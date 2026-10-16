@@ -1,63 +1,95 @@
 // controllers/userController.js
-const { estNonVide, estEmailValide } = require('../utils/validators');
+const User = require('../models/userModel');
+const Article = require('../models/articleModel');
 
-// Données en mémoire
-let users = [
-  { id: 1, name: 'Aya Ben Salah', email: 'aya@blog.tn', role: 'admin' },
-  { id: 2, name: 'Youssef Trabelsi', email: 'youssef@blog.tn', role: 'auteur' }
-];
-let prochainId = 3;
+// Message commun pour les identifiants mal formés (Exercice 2)
+const MSG_CAST = 'Identifiant de ressource invalide (format ObjectId attendu)';
 
 // 1. Récupérer tous les utilisateurs (filtre optionnel ?role=...)
-const getAllUsers = (req, res) => {
-  const { role } = req.query;
-  let resultat = users;
-  if (role) {
-    resultat = users.filter(u => u.role === role);
+const getAllUsers = async (req, res) => {
+  try {
+    const { role } = req.query;
+    const filtre = role ? { role } : {};
+    const users = await User.find(filtre);
+    res.status(200).json(users);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
-  res.status(200).json({ total: resultat.length, users: resultat });
 };
 
 // 2. Récupérer un utilisateur par son ID
-const getUserById = (req, res) => {
-  const id = Number(req.params.id);
-  const user = users.find(u => u.id === id);
-  if (!user) {
-    return res.status(404).json({ error: `Utilisateur ${id} introuvable` });
+const getUserById = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ message: 'Utilisateur non trouve' });
+    }
+    res.status(200).json(user);
+  } catch (err) {
+    if (err.name === 'CastError') {
+      return res.status(400).json({ message: MSG_CAST });
+    }
+    res.status(500).json({ message: err.message });
   }
-  res.status(200).json(user);
 };
 
-// 3. Créer un utilisateur (validation de name et email)
-const createUser = (req, res) => {
-  const { name, email, role } = req.body;
+// 3. Créer un utilisateur
+const createUser = async (req, res) => {
+  try {
+    const { name, email, age, role, bio, phone } = req.body;
 
-  if (!estNonVide(name)) {
-    return res.status(400).json({ error: 'Le nom est obligatoire et ne doit pas être vide' });
-  }
-  if (!estEmailValide(email)) {
-    return res.status(400).json({ error: "L'email est invalide (il doit contenir '@' et '.')" });
-  }
+    if (!name || !email) {
+      return res.status(400).json({ message: "Le nom et l'email sont requis" });
+    }
 
-  const nouvelUser = {
-    id: prochainId++,
-    name: name.trim(),
-    email: email.trim(),
-    role: role || 'lecteur'
-  };
-  users.push(nouvelUser);
-  res.status(201).json({ message: 'Utilisateur créé', user: nouvelUser });
+    // Vérification de doublon d'email → 409
+    const exists = await User.findOne({ email: email.toLowerCase().trim() });
+    if (exists) {
+      return res.status(409).json({ message: 'Cet email est deja utilise' });
+    }
+
+    const user = await User.create({ name, email, age, role, bio, phone });
+    res.status(201).json(user);
+  } catch (err) {
+    // Erreurs de validation du schéma (regex email, age min, enum, phone, bio...)
+    if (err.name === 'ValidationError') {
+      return res.status(400).json({ message: err.message });
+    }
+    // Doublon détecté par l'index unique de MongoDB
+    if (err.code === 11000) {
+      return res.status(409).json({ message: 'Cet email est deja utilise' });
+    }
+    res.status(500).json({ message: err.message });
+  }
 };
 
-// 4. Supprimer un utilisateur
-const deleteUser = (req, res) => {
-  const id = Number(req.params.id);
-  const existe = users.some(u => u.id === id);
-  if (!existe) {
-    return res.status(404).json({ error: `Impossible de supprimer : utilisateur ${id} introuvable` });
+// 4. Supprimer un utilisateur (Exercice 1 : intégrité référentielle)
+const deleteUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Vérifier que l'utilisateur existe
+    const user = await User.findById(id);
+    if (!user) {
+      return res.status(404).json({ message: 'Utilisateur non trouve' });
+    }
+
+    // Interdire la suppression s'il a publié au moins un article
+    const article = await Article.findOne({ author: id });
+    if (article) {
+      return res.status(400).json({
+        message: 'Impossible de supprimer un utilisateur ayant des articles publies'
+      });
+    }
+
+    await User.findByIdAndDelete(id);
+    res.status(200).json({ message: 'Utilisateur supprime avec succes', id });
+  } catch (err) {
+    if (err.name === 'CastError') {
+      return res.status(400).json({ message: MSG_CAST });
+    }
+    res.status(500).json({ message: err.message });
   }
-  users = users.filter(u => u.id !== id);
-  res.status(200).json({ message: `Utilisateur ${id} supprimé avec succès` });
 };
 
 module.exports = {
