@@ -1,19 +1,32 @@
-
 const express = require('express');
 const router = express.Router();
 
-const userController = require('../controllers/userController');
+const {
+    registerUser,
+    loginUser,
+    getUserProfile,
+    getAllUsers,
+    updatePassword
+} = require('../controllers/userController');
 
-// Récupérer tous les utilisateurs
-router.get('/', userController.getAllUsers);
+const { protect, adminOnly } = require('../middlewares/authMiddleware');
 
-// Récupérer un utilisateur par son ID
-router.get('/:id', userController.getUserById);
+// Route sécurisée de mise à jour du mot de passe
+router.put('/update-password', protect, updatePassword);
 
-// Créer un utilisateur
-router.post('/', userController.createUser);
+// Routes d'authentification publiques
+router.post('/register', registerUser);
+router.post('/login', loginUser);
 
-// Supprimer un utilisateur en vérifiant ses dépendances
-router.delete('/:id', userController.deleteUser);
+// Route privee protegee par Token JWT
+router.get('/profile', protect, getUserProfile);
+
+// Route reservee aux administrateurs (JWT valide + role admin requis)
+router.get('/', protect, adminOnly, getAllUsers);
 
 module.exports = router;
+
+
+
+
+
